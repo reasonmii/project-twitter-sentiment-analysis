@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<title>Co-metion Graph</title>
+		<script type="text/javascript" src="../lib/d3.v5.min.js"></script>
+		<style type="text/css">
+			/* No style rules here yet */
+		</style>
+	</head>
+	<body>
+		<script>
+			var margin = {top: 20, right: 20, bottom: 20, left: 20},
+				padding = {top: 60, right: 60, bottom: 60, left: 60},
+				outerWidth = 1400,
+				outerHeight = 900,
+				innerWidth = outerWidth - margin.left - margin.right,
+				innerHeight = outerHeight - margin.top - margin.bottom,
+				width = innerWidth - padding.left - padding.right,
+				height = innerHeight - padding.top - padding.bottom;
+
+			var pathToCsv = "./graph_data_v2.csv";
+			d3.dsv(",", pathToCsv
+			).then(function(data) {
+				var dataset = {};
+				var nodeID = {};
+				dataset['nodes'] = new Set()
+				for (let i=0; i<data.length; i++){
+					dataset['nodes'].add(data[i]['node1']);
+					dataset['nodes'].add(data[i]['node2']);
+				}
+				dataset['nodes'] = Array.from(dataset['nodes']);
+				for (let i=0; i<dataset['nodes'].length; i++){
+					dataset['nodes'][i] = {
+						'id': i,
+						'name': dataset['nodes'][i],
+						'count': 0,
+						'group': 0,
+					};
+					nodeID[dataset['nodes'][i]['name']] = i;
+				}
+
+				dataset['links'] = []
+				for (let i=0; i<data.length; i++){
+					dataset['links'].push(
+					{
+						'source': nodeID[data[i]['node1']],
+						'target': nodeID[data[i]['node2']],
+						'value': parseInt(data[i]['value']),
+					}
+					);
+					dataset['nodes'][nodeID[data[i]['node1']]].count += parseInt(data[i]['value']);
+					dataset['nodes'][nodeID[data[i]['node2']]].count += parseInt(data[i]['value']);
+				}
+
+				var svg = d3.select("body")
+							.append("svg")
+							.attr("width", width + margin.left + margin.right)
+							.attr("height", height + margin.top + margin.bottom)
+							.attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+				
+				var colors = d3.scaleQuantize()
+							   .domain([d3.min(dataset['nodes'], function(d){
+								return d.count;
+							   }),d3.max(dataset['nodes'], function(d){
+								return d.count;
+							   })])
+    						   .range(["#feedde", "#fdbe85", "#fd8d3c", "#e6550d"]);
+				
+				var radius = d3.scaleSqrt()
+							   .range([0, 10]);
+				
+				var simulation = d3.forceSimulation()
+					.force("link", 
+						d3.forceLink().id(function(d) { return d.id; })
+						.distance(function(d) {
+							return 250;
+							// return radius(d.source.value/2) + radius(d.target.value/2); 
+						})
+						.strength(function(d) {return 0.01; })
+					)
+					.force("charge", d3.forceManyBody().strength(-250))
+					.force("collide", d3.forceCollide().radius(function(d) { return radius(d.value / 2) + 2; }))
+					.force("center", d3.forceCenter(width / 2, height / 2));
+
+				var link = svg.append("g")
+					.attr("class", "links")
+					.selectAll("path")
+					.data(dataset['links'])
+					.enter().append("svg:path")
+					.attr("stroke-width", function(d) { return 1 });
+
+				link.style('fill', 'none')
+					.style('stroke', '#a63603')
+					.style('stroke-width', function(d){
+						var xxx = d3.scaleLinear()
+							   .range([0.1, 5]);
+						return xxx(d.value/2000000);
+					})
+					// .style("stroke-width", '2px');
+
+				var node = svg.append("g")
+					.attr("class", "nodes")
+					.selectAll("g")
+					.data(dataset['nodes'])
+					.enter().append("g")
+					.style('transform-origin', '50% 50%')
+					.call(d3.drag()
+						.on("start", dragstarted)
+						.on("drag", dragged)
+						.on("end", dragended))
+					.on('dblclick', dblclicked);
+				
+				node.append('circle')
+					.attr("r", function(d) { 
+						return radius(d.count / 1000000 + 5); 
+					})
+					.attr("fill", function(d) { 
+						return colors(d.count);
+						return '#ababab';
+						// return color(d.group); 
+					})
+					
+				node.append("text")
+					.attr("dy", ".35em")
+					.attr("text-anchor", "middle")
+					.attr('fill', '#08519c')
+					.attr('font-famiy', 'sans-serif')
+					.attr('font-size', function(d){
+						return d.count/1000000 + 10;
+					})
+					.text(function(d) {
+						return d.name; 
+					});
+				
+				simulation
+					.nodes(dataset['nodes'])
+					.on("tick", ticked);
+
+				simulation.force("link")
+					.links(dataset['links']);
+
+				function ticked() {
+					link.attr("d", function(d) {
+						var dx = d.target.x - d.source.x,
+							dy = d.target.y - d.source.y,
+							dr = Math.sqrt(dx * dx + dy * dy);
+						return "M" + 
+							d.source.x + "," + 
+							d.source.y + "A" + 
+							dr + "," + dr + " 0 0,1 " + 
+							d.target.x + "," + 
+							d.target.y;
+					});
+					node.attr("transform", function(d) {
+						return "translate(" + d.x + "," + d.y + ")"; 
+					});
+				}
+
+				function dragstarted(d) {
+					if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+					d.fx = d.x;
+					d.fy = d.y;
+				}
+
+				function dragged(d) {
+					d.fx = d3.event.x;
+					d.fy = d3.event.y;
+				}
+
+				function dragended(d) {
+					d.fixed = true;
+						if (!d3.event.active) simulation.alphaTarget(0);
+						if (d.fixed == true) {
+							d.fx = d3.event.x;
+							d.fy = d3.event.y;
+						}
+						else {
+							d.fx = null;
+							d.fy = null;
+						}
+				}
+				
+				function dblclicked(d){
+					d.fixed = false;
+					d.fx = null;
+					d.fy = null;
+				}
+				
+			})
+		</script>
+	</body>
+</html>

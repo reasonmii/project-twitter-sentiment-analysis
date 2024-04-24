@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<head>
+    <!-- add title -->
+    <title>Tweets by Country</title>
+    
+    <!-- import required libraries here -->
+    
+    <style>
+        /* define CSS rules */    
+        #tooltip{
+            font-size: 12px;
+            /* position: absolute; */
+            color: black;
+            background-color: #ffffd4;
+            padding: 8px;
+            border-radius: 10px;
+        }
+
+        #tweettext{
+            font-size: 12px;
+            color: black;
+            background-color: white;   
+            padding: 8px;
+            max-width: 350px;
+        }
+
+    </style>
+
+</head>
+
+<!-- JSON file - geometry [a, b] : longitude is alwyas listed first -->
+
+<body>
+    <script type="text/javascript" src="lib/d3.v5.min.js"></script>
+    <script type="text/javascript" src="lib/d3-dsv.min.js"></script>
+    <script type="text/javascript" src="lib/d3-tip.min.js"></script>
+
+    <!-- Add heading for the visualization -->
+    
+    <!-- Create dropdown element here. Options should be added after reading in game file, they should not be created here.-->
+    <label for="tagDropdown">Select Top 30 Hashtags:</label>
+    <select id="tagDropdown"></select>
+
+    <!-- append visualization svg to this div-->
+    <div id="choropleth"></div>
+
+    <script>
+
+        // ===========================================================
+        // enter code to define margin and dimensions for svg
+        // ===========================================================
+
+        var margin = {top: 30, right:20, bottom: 30, left:20},
+            padding = {top: 20, right: 30, bottom: 20, left: 30},
+            outerWidth = 1200,
+            outerHeight = 900,
+            innerWidth = outerWidth - margin.left - margin.right,
+            innerHeight = outerHeight - margin.top - margin.bottom,
+            width = innerWidth - padding.left - padding.right, 
+            height = innerHeight - padding.top - padding.bottom;
+
+        // ===========================================================
+        // enter code to create svg
+        // ===========================================================
+
+        var svg = d3.select("div#choropleth")
+                    .append("svg")
+                    .attr("id", "choropleth")
+                    .attr("width",width)
+                    .attr("height",height)
+
+        svg.append("text")
+           .attr("id", "title")
+           .attr("x", innerWidth/2)
+           .attr("y", innerHeight/2-330)
+           .text("Number of Tweets for Top 30 Hashtags")
+           .attr("font-weight", "bold")
+           .attr("font-size", "24px")
+           .style("text-anchor", "middle")
+
+        var countries = svg.append("g")
+                           .attr("id", "countries")
+
+        var legend = svg.append("g")
+                         .attr("id", "legend")
+                         .attr('transform', 'translate(10, 40)')
+
+        // ===========================================================
+        // enter code to create color scale
+        // Quantile Scales
+        // https://github.com/d3/d3-scale/blob/main/README.md#quantile-scales
+        // https://dschnurr.medium.com/using-clustering-to-create-a-new-d3-js-color-scale-dec4ccd639d2
+        // Color Brewer : https://colorbrewer2.org/#type=sequential&scheme=BuPu&n=4
+        // ===========================================================
+
+        var colors = ["rgb(203,201,226)", "rgb(158,154,200)",  "rgb(117,107,177)", "rgb(84,39,143)", "rgb(242,240,247)", ]
+
+        // ===========================================================
+        // enter code to define tooltip
+        // Positioning tooltip
+        // https://github.com/caged/d3-tip/blob/master/docs/positioning-tooltips.md
+        // ===========================================================
+        
+        var tip = d3.tip()
+                    .attr("id", "tooltip")
+                    .direction("n")
+                    .offset([0, 0])
+
+        var tip2 = d3.tip()
+                     .attr("id", "tweettext")
+                     .direction("n")
+                     .offset([300, 200])
+        
+        // ===========================================================
+        // enter code to define projection and path required for Choropleth
+        // For grading, set the name of functions for projection and path as "projection" and "path"
+        // ===========================================================
+
+        var projection = d3.geoNaturalEarth1()
+                           .translate([innerWidth/2, innerHeight/2])
+                           .scale(200)
+                           .rotate([0, 0])
+                           .center([0, 0])
+                           
+        var path = d3.geoPath()
+                     .projection(projection)
+        
+        // ===========================================================
+        // define any other global variables 
+        // ===========================================================
+
+        var pathToCsv = "dataset/preprocessed/topHashtag_avg_tweet_f.csv";
+        var pathToJson = "dataset/world_countries.json";
+        var timeform = d3.timeParse("%Y%m%d")
+        var data = {}
+       
+        // ===========================================================
+        // https://datawanderings.com/2018/10/28/making-a-map-in-d3-js-v-5/
+        // ===========================================================
+
+        Promise.all([
+            // enter code to read files
+            d3.dsv(",", pathToCsv, function(d){
+                return {
+                    hashtag : d.hashtag,
+                    country : d.location,
+                    cnt : +d.cnt,
+                    retweet_mean : +d.retweet_mean,
+                    retweet_max : +d.retweet_max,
+                    text : d.text
+                }
+            }),
+            d3.json(pathToJson),
+        ]).then(
+            // enter code to call ready() with required arguments
+            function(data){
+                ready(null, data[1], data[0])  // json, csv                     
+            }       
+        );
+        
+        // this function should be called once the data from files have been read
+        // world: topojson from world_countries.json
+        // tweetData: data from topHashtag_avg_tweet_f.csv
+
+        // https://bl.ocks.org/elktamer/fe8b8ce008468eaad3e05a6d944ef405        
+        function ready(error, world, tweetData) {
+
+            // ===========================================================
+            // Extract all unique tags from tweetData
+            // ===========================================================
+            var tagList = d3.map(tweetData, function(d) {return d.hashtag}).keys()
+            tagList.sort();
+            console.log('tags', tagList) // -> list form
+
+            // ===========================================================
+            // Extract all unique countries from world.features
+            // ===========================================================
+            var countryList = d3.map(world.features, function(d) {return d.properties.name}).keys()
+
+            // ===========================================================
+            // Append the tag options to the dropdown
+            // https://codepen.io/tarsusi/pen/reovOV
+            // ===========================================================
+
+            d3.select("#tagDropdown")
+              .selectAll("option")
+              .data(tagList)
+              .enter()
+              .append("option")
+              .text(function(d) {return d})
+              .attr("value", function(d) {return d})
+
+            // ===========================================================
+            // Create a game dataset : "data"
+            // ===========================================================
+            tagList.forEach(function(name){
+                data[name] = {
+                    'tags': name,
+                    'values': []
+                }
+            })
+
+            // console.log(data)
+
+            tweetData.forEach(function(d){
+                tags = d.hashtag,
+                country = d.country,
+                tweets = d.cnt,
+                retweet_avg = d.retweet_mean,
+                retweet_max = d.retweet_max,
+                text = d.text,
+                data[tags]['values'].push({
+                    'tags': tags,
+                    'country': country,
+                    'tweets': tweets,
+                    'rt_avg': retweet_avg,
+                    'rt_max': retweet_max,
+                    'text': text,
+                })
+            })
+
+            // ===========================================================
+            // Sort by tweets
+            // ===========================================================
+
+            for (var name in data) {
+                data[name]['values'].sort(function(a, b){return a.rating - b.rating})
+            }
+          
+            for (var name in data) {
+
+                // Calculate the quartiles
+                // ===========================================================
+
+                var num = data[name]['values'].length
+                var q_0 = data[name]['values'][0]['tweets']
+                var q_1 = data[name]['values'][parseInt((num+1)*(1/4))]['tweets']
+                var q_2 = data[name]['values'][parseInt((num+1)*(2/4))]['tweets']
+                var q_3 = data[name]['values'][parseInt((num+1)*(3/4))]['tweets']
+                var q_4 = data[name]['values'][num-1]['tweets']
+                data[name]['quartiles'] = [q_0.toFixed(2), q_1.toFixed(2), q_2.toFixed(2), q_3.toFixed(2), q_4.toFixed(2)];
+
+                data[name]['values'].forEach(function(d){
+                    if (d.tweets < q_1) {d['quartile'] = 0}
+                    else if (d.tweets < q_2) {d['quartile'] = 1}
+                    else if (d.tweets < q_3) {d['quartile'] = 2}
+                    else {d['quartile'] = 3}
+                })
+
+                console.log(data)
+
+                // Push "N/A"
+                // ===========================================================
+
+                countryList.forEach(function(country){
+                    var chk = false;
+                    for (let i=0; i < num; i++) {
+                        if (data[name]['values'][i]['country'] == country) {
+                            chk = true;
+                            break;
+                        }
+                    }
+                    if (chk == false) { // if (!chk)
+                        data[name]['values'].push({
+                            'tags': name,
+                            'country': country,
+                            'tweets': "N/A",
+                            'rt_avg': "N/A",
+                            'rt_max': "N/A",
+                            'text':"N/A",
+                            'quartile': 4
+                        })
+                    }
+                })
+            }
+            
+            // ===========================================================
+            // Event listener for the dropdown
+            // Update choropleth and legend when selection changes
+            // ===========================================================
+            
+            // 방법1
+            d3.select("#tagDropdown")
+              .on("change", function(d){
+                var choose = d3.select("#tagDropdown").node().value; // tag's name
+                createMapAndLegend(world, data, choose)
+              })
+            
+            // ===========================================================
+            // create Choropleth with default option
+            // ===========================================================
+            createMapAndLegend(world, data, tagList[0])
+        }
+
+        // this function should create a Choropleth and legend using the world and gameData arguments for a selectedGame
+        // also use this function to update Choropleth and legend when a different game is selected from the dropdown
+        function createMapAndLegend(world, tweetData, selectedTag){ 
+
+            // 다 안 날려주면 이전 이력이 계속 남아서 지도가 업데이트가 안 됨
+            countries.selectAll("*").remove();
+            legend.selectAll("*").remove()
+            d3.selectAll("div#tooltip").remove();
+
+            // ===========================================================
+            // Create a world dataset for a selected game
+            // ===========================================================
+            tweetData[selectedTag]['values'].forEach(function(d){
+                var value = d['country']
+                for (let i=0; i<world.features.length; i++) {
+                    if (world.features[i].properties.name == value) {
+                        world.features[i]['tweetsInfo'] = d
+                        break   
+                    }
+                }
+            })
+
+            // console.log(selectedGame)
+            // console.log('world features', world.features)
+
+            tip.html(function(d){
+                return `Country: ${d['tweetsInfo']['country']}</br>
+                Tweet : ${d['tweetsInfo']['tweets']}</br>
+                Retweet Avg : ${d['tweetsInfo']['rt_avg']}</br>
+                Retweet Max : ${d['tweetsInfo']['rt_max']}`
+            })      
+
+            tip2.html(function(d){
+                return `${d['tweetsInfo']['text']}`
+            })
+
+            svg.call(tip)
+            svg.call(tip2)
+
+            // console.log(world.features)
+
+            // ===========================================================
+            // Create a map
+            // ===========================================================
+
+            countries.selectAll("path")
+                     .data(world.features)
+                     .enter()
+                     .append("path")
+                     .attr("d", path)
+                     .attr("fill", function (d) {
+                         return colors[d['tweetsInfo']['quartile']]
+                         })
+                     .on('mouseover', tip.show)
+                     .on('mouseleave', tip2.show)
+                     .on('mouseout', tip.hide)
+                     .on('mouseout', tip2.hide);
+
+            // ===========================================================
+            // Create a legend
+            // ===========================================================
+
+            quant = tweetData[selectedTag]['quartiles']
+
+            for (i=0; i<4; i++) {
+                legend.append("rect")
+                      .attr("x", margin.left + padding.left + 100)
+                      .attr("y", height - 300 + i*20)
+                      .attr("width", 12)
+                      .attr("height", 12)
+                      .attr("fill", colors[i])
+            }
+
+            for (i=1; i<quant.length; i++) {
+                legend.append("text")
+                      .attr("x", margin.left + padding.left + 120)
+                      .attr("y", height - 300 + i*20-10)
+                      .text(quant[i] + " ~")
+                    //   .text(quant[i] + " to " + quant[i+1])
+                      .attr("font-size", "12px")
+            }           
+            
+    }
+
+    </script>
+
+</body>
+
+</html>

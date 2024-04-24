@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<head>
+    <!-- add title -->
+    <title>Sentiment Map</title>
+    <!-- import required libraries here -->
+    <script type="text/javascript" src="../lib/d3.v5.min.js"></script>
+    <script type="text/javascript" src="../lib/d3-dsv.min.js"></script>
+    <script type="text/javascript" src="../lib/d3-tip.min.js"></script>
+    <style>
+        /* define CSS rules here */
+        div#tooltip{
+            background-color: black;
+            color: white;
+        }
+        p#tooltip {
+            background-color: black;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <!-- Add heading for the visualization -->
+    <!-- Create dropdown element here. Options should be added after reading in game file, they should not be created here.-->
+    <label for="gameDropdown">Select date:</label>
+    <select id="gameDropdown"></select>
+    <button onclick="btnClick()" id="btn">Auto Progress Off</button>
+    <!-- append visualization svg to this div-->
+    <div id="choropleth"></div>
+
+    <script>
+        // enter code to define margin and dimensions for svg
+        var margin = {top: 20, right: 20, bottom: 40, left: 80},
+            padding = {top: 60, right: 60, bottom: 60, left: 60},
+            outerWidth = 1600,
+            outerHeight = 900,
+            innerWidth = outerWidth - margin.left - margin.right,
+            innerHeight = outerHeight - margin.top - margin.bottom,
+            width = innerWidth - padding.left - padding.right,
+            height = innerHeight - padding.top - padding.bottom;
+        
+        // enter code to create svg
+        var svg = d3.select("div#choropleth")
+                   .append("svg")
+                   .attr("id", "choropleth")
+                   .attr("width", width + margin.left + margin.right)
+                   .attr("height", height + margin.top + margin.bottom)
+                   .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+        var g1 = d3.select('svg')
+                   .append('g')
+                   .attr('id', 'countries');
+
+        var g2 = d3.select('svg')
+                   .append('g')
+                   .attr('id', 'legend');
+        
+        svg.append('text')
+          .attr('x', width/2)
+          .attr('y', 25)
+          .attr('text-anchor', 'middle')
+          .attr('font-family', 'sans-serif')
+          .attr('font-size', '30px')
+          .attr('id', 'date')
+          .text('d');        
+
+        // enter code to create color scale
+        var colors = ["#de2d26", "#fc9272", "#9ecae1", "#3182bd", '#636363']
+        // var colors = d3.scaleQuantize()
+		// 			   .range(["#edf8fb", "#b2e2e2", "#66c2a4", "#238b45", 'grey']);
+        // // enter code to define tooltip
+        
+        // enter code to define projection and path required for Choropleth
+        // For grading, set the name of functions for projection and path as "projection" and "path"
+        var projection = d3.geoNaturalEarth1()
+						   .translate([width/2, height/2])
+						   .scale([width * 0.16]);
+        var path = d3.geoPath()
+					 .projection(projection);
+
+        // define any other global variables
+        var dates = new Set();
+        var dataSet = {};
+        var auto = false;
+        var idx = 0;
+
+        Promise.all([
+            // enter code to read files
+            d3.csv('sentiments.csv', function(d){
+                return {
+                    Date: d['date'],
+                    Country: d['location'],
+                    'Number of Tweets': +d['tweetcreatedts'],
+                    'Average Sentiment': +d['sentiment'],
+                };
+            }),
+            d3.json('world_countries.json'),
+        ]).then(([tweetData, world]) => {
+            // enter code to call ready() with required arguments
+            ready(null, world, tweetData);
+            }
+        );
+        
+        // this function should be called once the data from files have been read
+        // world: topojson from world_countries.json
+        // tweetData: data from ratings-by-country.csv
+        
+        function ready(error, world, tweetData) {
+            // enter code to extract all unique games from gameData
+            // enter code to append the game options to the dropdown
+            // event listener for the dropdown. Update choropleth and legend when selection changes. Call createMapAndLegend() with required arguments.
+            // create Choropleth with default option. Call createMapAndLegend() with required arguments. 
+            
+            // dates: Array of game names
+            tweetData.forEach(function(g, i, arr){
+                dates.add(g['Date']);
+            });
+            dates = Array.from(dates);
+            dates.sort();
+            
+            // set display date
+            document.getElementById('date').innerHTML = dates[0];
+
+            // add options to select
+            var select = document.getElementById('gameDropdown');
+            dates.forEach(function(val, index){
+                var option = document.createElement('option');
+                option.text = val;
+                option.value = val;
+                select.appendChild(option);
+            })
+            
+            // countries: Array of countries
+            var countries = []
+            world.features.forEach(function(d){
+                countries.push(d['properties']['name']);
+            })
+
+            // Organizing dataset
+            dates.forEach(function(val, index){
+                dataSet[val] = {
+                    'date': val,
+                    'countries': [],
+                };
+            })
+
+            tweetData.forEach(function(g, i){
+                date = g['Date'];
+                country = g['Country'];
+                count = g['Number of Tweets'];
+                rating = g['Average Sentiment'];
+                dataSet[date]['countries'].push({
+                    'date': date,
+                    'country': country,
+                    'count': count,
+                    'rating': rating,
+                });
+            })
+            
+            for (var key in dataSet){
+                dataSet[key]['countries'].forEach(function(d, i){
+                    if (d['rating'] < -0.5){
+                        d['quartile'] = 0;
+                    }
+                    else if (d['rating'] < 0){
+                        d['quartile'] = 1;
+                    }
+                    else if (d['rating'] < 0.5){
+                        d['quartile'] = 2;
+                    }
+                    else{
+                        d['quartile'] = 3;
+                    }
+                })
+            }
+
+            // Countries without values
+            for (var key in dataSet){
+                var numCountries = dataSet[key]['countries'].length;
+                countries.forEach(function(c){
+                    var isFound = false;
+                    for (var i=0; i<numCountries; i++){
+                        if (dataSet[key]['countries'][i]['country'] == c){
+                            isFound = true;
+                            break;
+                        }
+                    }
+                    if (!isFound){
+                        dataSet[key]['countries'].push({
+                            'game': key,
+                            'country': c,
+                            'count': 'N/A',
+                            'rating': 'N/A',
+                            'quartile': 4,
+                        })
+                    }
+                })
+            }
+
+            // default
+            var selectedDate = dates[0];
+            createMapAndLegend(world, dataSet, selectedDate);
+
+            // event listener to select
+            document.getElementById('gameDropdown').addEventListener('change', function() {
+                selectedDate = this.value;
+                createMapAndLegend(world, dataSet, selectedDate);
+            });
+
+            // auto update over time
+            var inter = setInterval(function() {
+                        if (auto){
+                            updateData(world, dataSet, dates);
+                        }
+                    }, 500);
+            
+            function updateData(world, dataSet, dates){
+                createMapAndLegend(world, dataSet, dates[idx]);
+                idx += 1
+                if (idx == dates.length){
+                    idx = 0
+                }
+            }
+        }
+
+        // click function for btn
+        function btnClick(){
+            auto = !auto;
+            if (auto){
+                document.getElementById('btn').innerText = 'Auto Progress On';
+                idx = dates.indexOf(document.getElementById('gameDropdown').value);
+            } else{
+                document.getElementById('btn').innerText = 'Auto Progress Off';
+            }
+        }
+
+        // this function should create a Choropleth and legend using the world and gameData arguments for a selectedGame
+        // also use this function to update Choropleth and legend when a different game is selected from the dropdown
+        function createMapAndLegend(world, dataSet, selectedDate){ 
+            // organize data
+            dataSet[selectedDate]['countries'].forEach(function(d){
+                var country = d['country'];
+                let idx = 0
+                for (let i = 0; i<177; i++){
+                    if (world.features[i]['properties']['name'] == country){
+                        idx = i;
+                        break;
+                    }
+                }
+                world.features[idx]['values'] = d;
+            })
+
+            // change display date
+            document.getElementById('date').innerHTML = selectedDate;
+
+            // tooltip
+            d3.selectAll('div#tooltip').remove();
+            
+            var tip = d3.tip()
+                        .attr('id', 'tooltip')
+                        .direction('s')
+                        .offset([50, 0])
+                        .html(function(d) {
+                            return `Country: ${d['values']['country']}<br>Date: ${d['values']['date']}<br>Avg Sentiment: ${d['values']['rating']}<br>Number of Tweets: ${d['values']['count']}`;
+                        });
+            svg.call(tip);
+            
+            // map
+            g1.selectAll('*').remove();
+
+            g1.selectAll("path")
+			  .data(world.features)
+			  .enter()
+			  .append("path")
+			  .attr("d", path)
+			  .style("fill", function(d){
+                return colors[d['values']['quartile']];
+              })
+              .on('mouseover', tip.show)
+              .on('mouseout', tip.hide);
+            
+            // labels
+            g2.selectAll('*').remove();
+            g2.append('rect')
+              .attr('x', width-120)
+              .attr('y', 50)
+              .attr('width', 15)
+              .attr('height', 15)
+              .attr('fill', colors[0]);
+            
+            g2.append('text')
+              .attr('x', width-90)
+              .attr('y', 62)
+              .attr('text-anchor', 'left')
+              .text('Very Negative')
+              .attr('font-size', '13px');
+
+            g2.append('rect')
+              .attr('x', width-120)
+              .attr('y', 70)
+              .attr('width', 15)
+              .attr('height', 15)
+              .attr('fill', colors[1]);
+            
+            g2.append('text')
+              .attr('x', width-90)
+              .attr('y', 82)
+              .attr('text-anchor', 'left')
+              .text('Slightly Negative')
+              .attr('font-size', '13px');
+
+            g2.append('rect')
+              .attr('x', width-120)
+              .attr('y', 90)
+              .attr('width', 15)
+              .attr('height', 15)
+              .attr('fill', colors[2]);
+            
+            g2.append('text')
+              .attr('x', width-90)
+              .attr('y', 102)
+              .attr('text-anchor', 'left')
+              .text('Slightly Positive')
+              .attr('font-size', '13px');
+
+            g2.append('rect')
+              .attr('x', width-120)
+              .attr('y', 110)
+              .attr('width', 15)
+              .attr('height', 15)
+              .attr('fill', colors[3]);
+            
+            g2.append('text')
+              .attr('x', width-90)
+              .attr('y', 122)
+              .attr('text-anchor', 'left')
+              .text('Very Positive')
+              .attr('font-size', '13px');
+            
+        }
+    </script>
+</body>
+
+</html>

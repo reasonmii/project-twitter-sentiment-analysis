@@ -1,0 +1,8 @@
+.env/*
+sentiment/cardiffnlp/*
+.env
+.env/*
+*.db
+*.db-journal
+data
+__pycache__
